@@ -1,5 +1,5 @@
 import ChatInspect from "@extensions/data/ui/pages/chat_inspect";
-import { getCurrentUserId } from "@extensions/data/ui/lib/current-user-id";
+import { getCurrentUserId } from "@extensions/data/ui/utils/current-user-id";
 
 interface AgentProps {
   portfolio: string;
