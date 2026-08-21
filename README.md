@@ -2,7 +2,7 @@
 
 Meta Cloud API channel for Renglo: inbound webhooks, LINK deep-link user binding, and Graph outbound send. Each portfolio owns its own `whatsapp_config` secrets.
 
-The installable Python module is **`whatsapp-mod`** under `package/`.
+The installable Python distribution is **`renglo-whatsapp`** (import package `whatsapp`) under `package/`.
 
 ## Why a thin edge Lambda?
 
@@ -174,7 +174,7 @@ extensions/whatsapp/
 ├── README.md
 ├── blueprints/
 ├── installer/          # upload_blueprints.py
-├── package/            # whatsapp-mod
+├── package/            # renglo-whatsapp
 └── ui/                 # console channels + settings
 ```
 
