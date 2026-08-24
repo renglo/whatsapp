@@ -22,3 +22,6 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["whatsapp*"]
+
+[tool.setuptools.package-data]
+"*" = ["blueprints/*.json"]
