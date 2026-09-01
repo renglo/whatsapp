@@ -1,6 +1,6 @@
 {
   "name": "@renglo/whatsapp",
-  "version": "1.0.0",
+  "version": "1.0.2-rc.1",
   "license": "MIT",
   "type": "module",
   "main": "./whatsapp.tsx",
