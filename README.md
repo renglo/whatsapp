@@ -128,7 +128,7 @@ Open the WhatsApp tool → **Config** and fill `whatsapp_config`:
 | `access_token` | Bearer token |
 | `app_secret` | `X-Hub-Signature-256` verification |
 | `verify_token` | GET `hub.verify_token` handshake |
-| `display_phone_e164` | Digits for `wa.me` deep links |
+| `display_phone_e164` | Fallback E.164 for `wa.me` links; **mint_link** reads the live number from Meta Graph when `access_token` + `phone_number_id` are set |
 | `api_version` | Default `v22.0` |
 | `agent_handler` | e.g. `dumbo/generic_agent` |
 | `webhook_enabled` | `true` / `false` |
@@ -144,6 +144,18 @@ Links are **portfolio-wide** (see [Tenancy](#tenancy-portfolio-org--identity)): 
 3. `wa.me/<digits>?text=…LINK-…` opens with a prefilled message (+ QR for laptop→phone)
 4. User taps Send → inbound consumes the code → binds `wa_id` → Renglo `user_id`
 5. Dashboard polls until **Connected ✓**
+
+### Meta test numbers (`+1 555 …`)
+
+Meta’s free sandbox numbers (e.g. `+1 555 676 3551`) **cannot** be opened via public [wa.me](https://wa.me) / click-to-chat links — WhatsApp will report “isn’t on WhatsApp” even when the URL is correct. They only exchange messages with phone numbers listed as **test recipients** in the [Meta App Dashboard](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started) (WhatsApp → API Setup).
+
+For test numbers, the Connect UI shows manual steps:
+
+1. Add your personal phone as a test recipient in Meta.
+2. In WhatsApp on your phone, start a **new chat** and type `+1 555 676 3551` manually (do not use wa.me).
+3. Send the prefilled `LINK-…` message.
+
+For real customer linking, register a **real business phone number** in Meta (not a 555 test number).
 
 Rules (from cos-demo): no silent auto-link, no-steal, replace-on-link, single-use codes.
 

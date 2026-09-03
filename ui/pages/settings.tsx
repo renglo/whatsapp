@@ -146,7 +146,7 @@ export default function WhatsappSettings({ portfolio }: AgentProps) {
               {field(
                 "display_phone_e164",
                 "Display phone (E.164)",
-                "Used for wa.me deep links (digits with or without +)",
+                "Fallback for wa.me links if Meta lookup fails — use full E.164 (e.g. +15551234567)",
               )}
               {field("api_version", "API version", "e.g. v22.0")}
               {field(

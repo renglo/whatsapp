@@ -4,6 +4,12 @@ __version__ = "1.0.0"
 __all__ = ["get_handler", "list_handlers", "HANDLERS"]
 
 
+def _get_initialize_extension():
+    from whatsapp.handlers.initialize_extension import InitializeExtension
+
+    return InitializeExtension
+
+
 def _get_whatsapp_onboardings():
     from whatsapp.handlers.whatsapp_onboardings import WhatsappOnboardings
 
@@ -35,6 +41,7 @@ def _get_identities():
 
 
 HANDLERS = {
+    "initialize_extension": _get_initialize_extension,
     "whatsapp_onboardings": _get_whatsapp_onboardings,
     "mint_link": _get_mint_link,
     "inbound": _get_inbound,

@@ -42,6 +42,51 @@ def meta_webhook_handshake(
     return str(challenge)
 
 
+def fetch_display_phone_digits(
+    *,
+    access_token: str,
+    phone_number_id: str,
+    api_version: str = "v22.0",
+) -> str | None:
+    """
+    Resolve the business display number from Meta Graph (authoritative for wa.me links).
+
+    Returns E.164 digits without ``+``, e.g. ``15551234567``.
+    """
+    if not access_token or not phone_number_id:
+        return None
+    url = f"{GRAPH_HOST}/{api_version}/{phone_number_id}"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"fields": "display_phone_number"}
+    try:
+        import requests
+
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        data: dict[str, Any] = {}
+        try:
+            data = response.json()
+        except Exception:
+            data = {"raw": response.text}
+        if not response.ok:
+            _logger.warning(
+                "Meta phone lookup failed %s for phone_number_id=%s: %s",
+                response.status_code,
+                phone_number_id,
+                data,
+            )
+            return None
+        raw = str(data.get("display_phone_number") or "").strip()
+        if not raw:
+            return None
+        from .link_token import normalize_wa_me_digits
+
+        digits = normalize_wa_me_digits(raw)
+        return digits or None
+    except Exception as exc:
+        _logger.warning("Meta phone lookup exception for phone_number_id=%s: %s", phone_number_id, exc)
+        return None
+
+
 def send_whatsapp_text(
     *,
     access_token: str,

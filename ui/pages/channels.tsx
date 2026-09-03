@@ -23,6 +23,9 @@ type MintResult = {
   code: string;
   deepLink: string | null;
   expiresAt: string;
+  isMetaTestNumber?: boolean;
+  displayPhone?: string;
+  prefillMessage?: string;
 };
 
 function unwrapHandlerOutput(data: unknown): Record<string, unknown> {
@@ -129,7 +132,10 @@ export default function WhatsappChannels({ portfolio, org, tool }: AgentProps) {
     baselineRef.current = new Set(
       identities.map((i) => String(i.external_id || "")).filter(Boolean),
     );
-    const appWindow = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
+    const appWindow =
+      typeof window !== "undefined" && !identities.length
+        ? window.open("about:blank", "_blank")
+        : null;
     if (appWindow) appWindow.opener = null;
 
     try {
@@ -145,16 +151,33 @@ export default function WhatsappChannels({ portfolio, org, tool }: AgentProps) {
         return;
       }
       const unwrapped = unwrapHandlerOutput(data);
-      const code = String(unwrapped.code || "");
-      const deepLink = (unwrapped.deepLink as string | null) || null;
-      const expiresAt = String(unwrapped.expiresAt || unwrapped.expires_at_iso || "");
-      if (!code || !expiresAt) {
-        setError("Mint response incomplete — check WhatsApp settings (display phone)");
+      if (unwrapped.success === false) {
+        setError(String(unwrapped.message || "Failed to mint link code"));
         appWindow?.close();
         return;
       }
-      setMint({ code, deepLink, expiresAt });
-      if (deepLink && appWindow) {
+      const code = String(unwrapped.code || "");
+      const deepLink = (unwrapped.deepLink as string | null) || null;
+      const expiresAt = String(unwrapped.expiresAt || unwrapped.expires_at_iso || "");
+      const isMetaTestNumber = Boolean(unwrapped.isMetaTestNumber);
+      const displayPhone = String(unwrapped.display_phone_e164 || "");
+      const prefillMessage = String(unwrapped.prefillMessage || "");
+      if (!code || !expiresAt) {
+        setError(
+          "Mint response incomplete — check WhatsApp Config (display phone or Meta credentials)",
+        );
+        appWindow?.close();
+        return;
+      }
+      setMint({
+        code,
+        deepLink,
+        expiresAt,
+        isMetaTestNumber,
+        displayPhone,
+        prefillMessage,
+      });
+      if (deepLink && appWindow && !isMetaTestNumber) {
         appWindow.location.href = deepLink;
       } else {
         appWindow?.close();
@@ -179,9 +202,18 @@ export default function WhatsappChannels({ portfolio, org, tool }: AgentProps) {
   const secondsLeft = mint
     ? Math.max(0, Math.floor((Date.parse(mint.expiresAt) - now) / 1000))
     : 0;
-  const qrUrl = mint?.deepLink
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(mint.deepLink)}`
-    : null;
+  const qrUrl =
+    mint?.deepLink && !mint.isMetaTestNumber
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(mint.deepLink)}`
+      : null;
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-2xl p-4 sm:p-6">
@@ -230,26 +262,79 @@ export default function WhatsappChannels({ portfolio, org, tool }: AgentProps) {
             </Button>
           ) : (
             <div className="space-y-4 rounded-md border border-border p-4">
-              <p className="text-sm">
-                Waiting for your message… expires in {secondsLeft}s
-              </p>
-              {mint.deepLink && (
-                <a
-                  href={mint.deepLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-emerald-700 underline"
-                >
-                  Open WhatsApp again
-                </a>
-              )}
-              {qrUrl && (
-                <div>
-                  <p className="mb-2 text-xs text-muted-foreground">
-                    Scan with your phone if the dashboard is on a laptop:
+              {mint.isMetaTestNumber ? (
+                <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  <p className="font-medium">Meta test number — manual linking required</p>
+                  <p>
+                    <code>{mint.displayPhone || "+1 555 …"}</code> is a Meta sandbox number. It is
+                    not reachable via public click-to-chat / wa.me links, even when the URL looks
+                    correct.
                   </p>
-                  <img src={qrUrl} alt="WhatsApp link QR" width={240} height={240} />
+                  <ol className="list-decimal space-y-2 pl-5">
+                    <li>
+                      In{" "}
+                      <a
+                        href="https://developers.facebook.com/apps/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        Meta App Dashboard
+                      </a>
+                      , open <strong>WhatsApp → API Setup</strong> and add your personal phone as a{" "}
+                      <strong>test recipient</strong>.
+                    </li>
+                    <li>
+                      On your phone, open WhatsApp → <strong>New chat</strong> → enter{" "}
+                      <code>{mint.displayPhone}</code> manually (do not use the wa.me link).
+                    </li>
+                    <li>
+                      Send this exact message (expires in {secondsLeft}s):
+                    </li>
+                  </ol>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="break-all rounded bg-white/80 px-2 py-1 text-xs">
+                      {mint.prefillMessage || mint.code}
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void copyText(mint.prefillMessage || mint.code)
+                      }
+                    >
+                      Copy message
+                    </Button>
+                  </div>
+                  <p className="text-xs">
+                    For production linking, register a real business number in Meta — test 555
+                    numbers are API-only.
+                  </p>
                 </div>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Waiting for your message… expires in {secondsLeft}s
+                  </p>
+                  {mint.deepLink && (
+                    <a
+                      href={mint.deepLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-emerald-700 underline"
+                    >
+                      Open WhatsApp again
+                    </a>
+                  )}
+                  {qrUrl && (
+                    <div>
+                      <p className="mb-2 text-xs text-muted-foreground">
+                        Scan with your phone if the dashboard is on a laptop:
+                      </p>
+                      <img src={qrUrl} alt="WhatsApp link QR" width={240} height={240} />
+                    </div>
+                  )}
+                </>
               )}
               <p className="break-all font-mono text-xs text-muted-foreground">{mint.code}</p>
               <Button variant="ghost" size="sm" onClick={() => setMint(null)}>

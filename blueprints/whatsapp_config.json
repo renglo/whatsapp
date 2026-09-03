@@ -67,7 +67,7 @@
     {
       "cardinality": "single",
       "default": "",
-      "hint": "E.164 display number for wa.me deep links (digits with or without +)",
+      "hint": "Fallback E.164 for wa.me links; mint_link prefers Meta Graph display_phone_number when token + phone_number_id are set",
       "label": "Display phone (E.164)",
       "layer": "0",
       "multilingual": false,
