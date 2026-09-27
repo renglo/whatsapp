@@ -1,0 +1,9 @@
+{
+  "handlers": {
+    "identities": "whatsapp.handlers.identities.Identities",
+    "inbound": "whatsapp.handlers.inbound.Inbound",
+    "mint_link": "whatsapp.handlers.mint_link.MintLink",
+    "post_message": "whatsapp.handlers.post_message.PostMessage",
+    "whatsapp_onboardings": "whatsapp.handlers.whatsapp_onboardings.WhatsappOnboardings"
+  }
+}

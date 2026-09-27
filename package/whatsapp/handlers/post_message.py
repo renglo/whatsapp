@@ -7,14 +7,36 @@ from typing import Any, Dict
 from renglo.common import load_config
 from renglo.data.data_controller import DataController
 
-from .config import CONFIG_ORG, ConfigStore
-from .meta_client import send_whatsapp_text
+from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.describe import describe_document
+from ..lib.meta_client import send_whatsapp_text
 
 
 class PostMessage:
     def __init__(self) -> None:
         config = load_config()
         self.DAC = DataController(config=config)
+
+    def describe(self, payload=None):
+        return describe_document(
+            "post_message",
+            "Send WhatsApp message",
+            "Send a WhatsApp text via the Meta Graph API. portfolio is injected by the platform. "
+            "target also accepts to. message also accepts text.",
+            {
+                "target": {
+                    "type": "string",
+                    "title": "Recipient",
+                    "description": "WhatsApp id of the recipient.",
+                },
+                "message": {"type": "string", "title": "Message"},
+            },
+            required=["target", "message"],
+            output_schema={
+                "type": "object",
+                "description": "Meta Graph API send result.",
+            },
+        )
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
