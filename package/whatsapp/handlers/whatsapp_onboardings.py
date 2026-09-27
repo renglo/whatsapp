@@ -8,7 +8,8 @@ from renglo.auth.auth_controller import AuthController
 from renglo.common import load_config
 from renglo.data.data_controller import DataController
 
-from .config import ConfigStore
+from ..lib.config import ConfigStore
+from ..lib.describe import describe_document
 
 
 class WhatsappOnboardings:
@@ -113,6 +114,19 @@ class WhatsappOnboardings:
             "input": [],
             "output": response,
         }
+
+    def describe(self, payload=None):
+        return describe_document(
+            "whatsapp_onboardings",
+            "WhatsApp onboarding",
+            "Install WhatsApp tools and the config singleton. portfolio is injected by the platform.",
+            {},
+            output_schema={
+                "type": "array",
+                "description": "One result object per setup step.",
+                "items": {"type": "object"},
+            },
+        )
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         results: List[Dict[str, Any]] = []
