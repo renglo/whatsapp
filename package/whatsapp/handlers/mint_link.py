@@ -8,16 +8,17 @@ from renglo.auth.auth_controller import AuthController
 from renglo.common import load_config
 from renglo.data.data_controller import DataController
 
-from .config import CONFIG_ORG, ConfigStore
-from .identity_store import IdentityStore
-from .link_token import (
+from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.describe import describe_document
+from ..lib.identity_store import IdentityStore
+from ..lib.link_token import (
     format_e164_display,
     is_meta_us_test_number,
     link_prefill_message,
     normalize_wa_me_digits,
     whatsapp_deep_link,
 )
-from .meta_client import fetch_display_phone_digits
+from ..lib.meta_client import fetch_display_phone_digits
 
 
 class MintLink:
@@ -25,6 +26,23 @@ class MintLink:
         config = load_config()
         self.DAC = DataController(config=config)
         self.AUC = AuthController(config=config)
+
+    def describe(self, payload=None):
+        return describe_document(
+            "mint_link",
+            "Mint WhatsApp link",
+            "Mint a LINK code and wa.me deep link for the authenticated user. "
+            "portfolio is injected by the platform.",
+            {},
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"},
+                    "expiresAt": {"type": "string", "format": "date-time"},
+                    "deepLink": {"type": "string"},
+                },
+            },
+        )
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")

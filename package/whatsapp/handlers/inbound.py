@@ -11,10 +11,11 @@ from renglo.common import load_config
 from renglo.data.data_controller import DataController
 from renglo.schd.schd_loader import SchdLoader
 
-from .config import CONFIG_ORG, ConfigStore
-from .identity_store import IdentityStore, extract_code_from_text
-from .meta_client import parse_meta_messages, send_whatsapp_text, verify_meta_signature
-from .session_coords import ensure_renglo_thread, record_channel_delivery
+from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.describe import describe_document
+from ..lib.identity_store import IdentityStore, extract_code_from_text
+from ..lib.meta_client import parse_meta_messages, send_whatsapp_text, verify_meta_signature
+from ..lib.session_coords import ensure_renglo_thread, record_channel_delivery
 
 _logger = logging.getLogger(__name__)
 
@@ -266,6 +267,32 @@ class Inbound:
             "action": "unlinked_nag",
             "external_id": external_id,
         }
+
+    def describe(self, payload=None):
+        return describe_document(
+            "inbound",
+            "WhatsApp inbound",
+            "Verify a Meta webhook body and dispatch each text message through the link gate and agent. "
+            "portfolio and org are injected by the platform. raw_body also accepts body or detail_raw_body.",
+            {
+                "raw_body": {
+                    "type": "string",
+                    "title": "Raw body",
+                    "description": "Exact webhook JSON string used for signature verification.",
+                },
+                "signature_header": {
+                    "type": "string",
+                    "title": "Signature",
+                    "description": "X-Hub-Signature-256 value. Aliases: x_hub_signature_256, X-Hub-Signature-256.",
+                },
+            },
+            required=["raw_body"],
+            output_schema={
+                "type": "array",
+                "description": "One result per inbound text message.",
+                "items": {"type": "object"},
+            },
+        )
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
