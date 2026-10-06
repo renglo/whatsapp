@@ -1,7 +1,8 @@
-"""channel_identities + channel_link_codes ring operations (cos-demo semantics)."""
+"""channel_identities, channel_link_codes, and inbound dedup ring operations."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from datetime import datetime, timezone
@@ -20,6 +21,8 @@ _logger = logging.getLogger(__name__)
 CHANNEL = "whatsapp"
 IDENTITIES_RING = "channel_identities"
 CODES_RING = "channel_link_codes"
+DEDUP_RING = "channel_inbound_dedup"
+INBOUND_DEDUP_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 def _now_iso() -> str:
@@ -77,6 +80,68 @@ class IdentityStore:
     def _list_ring_raw(self, ring: str) -> list[dict[str, Any]]:
         listed = self.DAC.DAM.get_a_b(self.portfolio, self.org, ring, limit=200)
         return [_attrs(r) for r in (listed.get("items") or [])]
+
+    def _claim_dedup(
+        self,
+        *,
+        id_hash: str,
+        message_id: str,
+        ttl_seconds: int = INBOUND_DEDUP_TTL_SECONDS,
+    ) -> bool:
+        """Return True when the dedup key is new; False when an active row already exists."""
+        prefix = f"{CHANNEL}:{id_hash}"
+        now = int(time.time())
+        for item in self._query(DEDUP_RING, prefix):
+            if str(item.get("message_id")) != message_id and str(item.get("id_hash")) != id_hash:
+                continue
+            try:
+                expires = int(str(item.get("expires_at") or "0"))
+            except ValueError:
+                expires = 0
+            if expires and expires < now:
+                continue
+            return False
+        expires_at = now + max(60, int(ttl_seconds))
+        posted = self._system_post(
+            DEDUP_RING,
+            {
+                "channel": CHANNEL,
+                "id_hash": id_hash,
+                "message_id": message_id,
+                "expires_at": str(expires_at),
+            },
+        )
+        if posted.get("error"):
+            _logger.warning("inbound dedup record failed: %s", posted)
+            return True
+        return True
+
+    def claim_inbound_envelope(
+        self,
+        body_hash: str,
+        *,
+        ttl_seconds: int = INBOUND_DEDUP_TTL_SECONDS,
+    ) -> bool:
+        """Return True when this exact webhook body is new; False on EventBridge/Meta replays."""
+        digest = (body_hash or "").strip().lower()
+        if not digest:
+            return True
+        token = f"envelope:{digest}"
+        id_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        return self._claim_dedup(id_hash=id_hash, message_id=token, ttl_seconds=ttl_seconds)
+
+    def claim_inbound_message(
+        self,
+        message_id: str,
+        *,
+        ttl_seconds: int = INBOUND_DEDUP_TTL_SECONDS,
+    ) -> bool:
+        """Return True when this Meta ``messages[].id`` is new; False when already seen."""
+        text = (message_id or "").strip()
+        if not text:
+            return True
+        id_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return self._claim_dedup(id_hash=id_hash, message_id=text, ttl_seconds=ttl_seconds)
 
     def resolve_identity(self, external_id: str) -> dict[str, Any] | None:
         items = self._query(IDENTITIES_RING, f"{CHANNEL}:{external_id}")
@@ -145,13 +210,7 @@ class IdentityStore:
             "output": response,
         }
 
-    def consume_link_code(
-        self,
-        *,
-        external_id: str,
-        code: str,
-        display_name: str = "",
-    ) -> dict[str, Any]:
+    def _pending_link_row(self, code: str) -> dict[str, Any] | None:
         code_hash = hash_link_code(code)
         items = self._query(CODES_RING, f"{CHANNEL}:{code_hash}")
         row = next(
@@ -165,14 +224,34 @@ class IdentityStore:
             None,
         )
         if not row:
-            return {"status": "invalid"}
-
+            return None
         try:
             expires_at = int(float(str(row.get("expires_at") or "0")))
         except (TypeError, ValueError):
             expires_at = 0
         if expires_at <= int(time.time()):
-            return {"status": "expired"}
+            return None
+        if not str(row.get("user_id") or "").strip():
+            return None
+        return row
+
+    def pending_link_minter(self, code: str) -> str | None:
+        """User id that minted this unconsumed, unexpired code. Does not consume."""
+        row = self._pending_link_row(code)
+        if not row:
+            return None
+        return str(row.get("user_id") or "")
+
+    def consume_link_code(
+        self,
+        *,
+        external_id: str,
+        code: str,
+        display_name: str = "",
+    ) -> dict[str, Any]:
+        row = self._pending_link_row(code)
+        if not row:
+            return {"status": "invalid"}
 
         minter = str(row.get("user_id") or "")
         if not minter:

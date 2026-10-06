@@ -1,0 +1,80 @@
+{
+  "_id": "a1b2c3d4-e5f6-7890-abcd-ef1234568004",
+  "added": "2026-10-06T12:00:00.000000",
+  "blueprint_origin": "",
+  "description": "Meta inbound message id dedup records (WhatsApp webhook retries)",
+  "fields": [
+    {
+      "cardinality": "single",
+      "default": "whatsapp",
+      "hint": "Channel kind (whatsapp)",
+      "label": "Channel",
+      "layer": "0",
+      "multilingual": false,
+      "name": "channel",
+      "order": "1",
+      "required": true,
+      "semantic": "whatsapp:channel",
+      "source": "",
+      "type": "string",
+      "widget": "text"
+    },
+    {
+      "cardinality": "single",
+      "default": "",
+      "hint": "SHA-256 hex of Meta messages[].id (query key)",
+      "label": "Id hash",
+      "layer": "0",
+      "multilingual": false,
+      "name": "id_hash",
+      "order": "2",
+      "required": true,
+      "semantic": "whatsapp:id_hash",
+      "source": "",
+      "type": "string",
+      "widget": "text"
+    },
+    {
+      "cardinality": "single",
+      "default": "",
+      "hint": "Raw Meta wamid from messages[].id",
+      "label": "Message id",
+      "layer": "0",
+      "multilingual": false,
+      "name": "message_id",
+      "order": "3",
+      "required": true,
+      "semantic": "whatsapp:message_id",
+      "source": "",
+      "type": "string",
+      "widget": "text"
+    },
+    {
+      "cardinality": "single",
+      "default": "",
+      "hint": "UNIX epoch seconds when this dedup row may be ignored",
+      "label": "Expires at",
+      "layer": "1",
+      "multilingual": false,
+      "name": "expires_at",
+      "order": "4",
+      "required": true,
+      "semantic": "whatsapp:expires_at",
+      "source": "",
+      "type": "string",
+      "widget": "text"
+    }
+  ],
+  "indexes": {
+    "path": ["channel", "id_hash"]
+  },
+  "handle": "irma",
+  "irn": "irn:blueprint:irma:channel_inbound_dedup",
+  "label": "Channel inbound dedup",
+  "license": "CC BY",
+  "name": "channel_inbound_dedup",
+  "public": true,
+  "status": "final",
+  "uri": "https://renglo.com/_blueprint/irma/channel_inbound_dedup/0.0.1",
+  "version": "0.0.1"
+}
