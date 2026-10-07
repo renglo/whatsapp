@@ -36,45 +36,110 @@ const EMPTY: ConfigForm = {
   webhook_enabled: "true",
 };
 
+const RING = "whatsapp_config";
+
+function formFromDocument(data: Record<string, unknown>): ConfigForm {
+  return {
+    phone_number_id: String(data.phone_number_id || ""),
+    access_token: String(data.access_token || ""),
+    app_secret: String(data.app_secret || ""),
+    verify_token: String(data.verify_token || ""),
+    display_phone_e164: String(data.display_phone_e164 || ""),
+    api_version: String(data.api_version || "v22.0"),
+    agent_handler: String(data.agent_handler || "dumbo/generic_agent"),
+    webhook_enabled: String(data.webhook_enabled ?? "true"),
+  };
+}
+
+function isConfigMissing(data: unknown, res: Response): boolean {
+  if (res.status === 404) {
+    return true;
+  }
+  if (!data || typeof data !== "object") {
+    return true;
+  }
+  const body = data as Record<string, unknown>;
+  if (body.success === false) {
+    return true;
+  }
+  const err = String(body.error || body.message || "");
+  if (/not found|could not be retrieved/i.test(err)) {
+    return true;
+  }
+  return !("_id" in body);
+}
+
 export default function WhatsappSettings({ portfolio, org }: AgentProps) {
   const [form, setForm] = useState<ConfigForm>(EMPTY);
+  const [configExists, setConfigExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = import.meta.env.VITE_API_URL;
-  const path = `${apiBase}/_data/${portfolio}/${org}/whatsapp_config/${SINGLETON_ID}`;
+  const authHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${sessionStorage.accessToken}`,
+  };
+  const documentPath = `${apiBase}/_data/${portfolio}/${org}/${RING}/${SINGLETON_ID}`;
+  const ringPath = `${apiBase}/_data/${portfolio}/${org}/${RING}`;
+
+  const createConfigDocument = useCallback(
+    async (payload: ConfigForm = EMPTY): Promise<boolean> => {
+      const res = await fetch(ringPath, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        return true;
+      }
+      const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      const err = String(data?.error || data?.message || "");
+      return /already exists|duplicate/i.test(err);
+    },
+    [ringPath, authHeaders.Authorization],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(path, {
-        headers: { Authorization: `Bearer ${sessionStorage.accessToken}` },
+      let res = await fetch(documentPath, {
+        headers: { Authorization: authHeaders.Authorization },
       });
-      if (!res.ok) {
-        setError("Could not load whatsapp_config — run Install first");
-        setForm(EMPTY);
-        return;
+      let data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+
+      if (isConfigMissing(data, res)) {
+        const created = await createConfigDocument();
+        if (!created) {
+          setError("Could not create whatsapp_config for this org");
+          setForm(EMPTY);
+          setConfigExists(false);
+          return;
+        }
+        res = await fetch(documentPath, {
+          headers: { Authorization: authHeaders.Authorization },
+        });
+        data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+        if (isConfigMissing(data, res)) {
+          setError("Could not load whatsapp_config after creating it");
+          setForm(EMPTY);
+          setConfigExists(false);
+          return;
+        }
       }
-      const data = await res.json();
-      setForm({
-        phone_number_id: String(data.phone_number_id || ""),
-        access_token: String(data.access_token || ""),
-        app_secret: String(data.app_secret || ""),
-        verify_token: String(data.verify_token || ""),
-        display_phone_e164: String(data.display_phone_e164 || ""),
-        api_version: String(data.api_version || "v22.0"),
-        agent_handler: String(data.agent_handler || "dumbo/generic_agent"),
-        webhook_enabled: String(data.webhook_enabled ?? "true"),
-      });
+
+      setForm(formFromDocument(data || {}));
+      setConfigExists(true);
     } catch {
       setError("Could not load whatsapp_config");
+      setConfigExists(false);
     } finally {
       setLoading(false);
     }
-  }, [path]);
+  }, [createConfigDocument, documentPath, authHeaders.Authorization]);
 
   useEffect(() => {
     void load();
@@ -85,18 +150,37 @@ export default function WhatsappSettings({ portfolio, org }: AgentProps) {
     setMessage(null);
     setError(null);
     try {
-      const res = await fetch(path, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionStorage.accessToken}`,
-        },
-        body: JSON.stringify(form),
-      });
+      let res: Response;
+      if (configExists) {
+        res = await fetch(documentPath, {
+          method: "PUT",
+          headers: authHeaders,
+          body: JSON.stringify(form),
+        });
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+          const err = String(errBody?.error || errBody?.message || "");
+          if (/not found|could not be retrieved/i.test(err)) {
+            res = await fetch(ringPath, {
+              method: "POST",
+              headers: authHeaders,
+              body: JSON.stringify(form),
+            });
+          }
+        }
+      } else {
+        res = await fetch(ringPath, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify(form),
+        });
+      }
+
       if (!res.ok) {
         setError("Save failed");
         return;
       }
+      setConfigExists(true);
       setMessage("Saved");
       await load();
     } catch {
