@@ -1,4 +1,8 @@
-"""Load / ensure the singleton ``whatsapp_config`` ring document."""
+"""Load / ensure one org's ``whatsapp_config`` document.
+
+The org id comes from the caller. An org whose id is ``_all`` is that org,
+not a stand-in for every org in the portfolio.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,11 @@ _logger = logging.getLogger(__name__)
 
 SINGLETON_ID = "00000000-0000-0000-0000-000000000000"
 RING = "whatsapp_config"
-CONFIG_ORG = "_all"
+
+
+def org_from_payload(payload: dict | None) -> str:
+    """Org on the call or webhook path. There is no portfolio-wide default."""
+    return str((payload or {}).get("org") or "").strip()
 
 
 @dataclass
@@ -32,12 +40,15 @@ class WhatsappConfig:
 
 
 class ConfigStore:
-    """Reads / ensures the extension singleton config (portfolio-scoped at ``_all``)."""
+    """Reads / ensures this org's WhatsApp config document."""
 
-    def __init__(self, data_controller: Any, portfolio: str, org: str = CONFIG_ORG) -> None:
+    def __init__(self, data_controller: Any, portfolio: str, org: str) -> None:
+        org_id = str(org or "").strip()
+        if not org_id:
+            raise ValueError("org is required")
         self.DAC = data_controller
         self.portfolio = portfolio
-        self.org = org or CONFIG_ORG
+        self.org = org_id
 
     def _parse_bool(self, raw: Any, default: bool = True) -> bool:
         if isinstance(raw, bool):

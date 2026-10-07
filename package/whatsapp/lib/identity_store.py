@@ -8,7 +8,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from .config import CONFIG_ORG
 from .link_token import (
     LINK_CODE_TTL_SECONDS,
     extract_link_code,
@@ -42,10 +41,13 @@ def _attrs(row: dict[str, Any]) -> dict[str, Any]:
 
 
 class IdentityStore:
-    def __init__(self, data_controller: Any, portfolio: str, org: str = CONFIG_ORG) -> None:
+    def __init__(self, data_controller: Any, portfolio: str, org: str) -> None:
+        org_id = str(org or "").strip()
+        if not org_id:
+            raise ValueError("org is required")
         self.DAC = data_controller
         self.portfolio = portfolio
-        self.org = org or CONFIG_ORG
+        self.org = org_id
 
     def _query(self, ring: str, value: str) -> list[dict[str, Any]]:
         response = self.DAC.get_a_b_query(

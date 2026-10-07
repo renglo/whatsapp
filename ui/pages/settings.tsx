@@ -13,7 +13,6 @@ interface AgentProps {
 }
 
 const SINGLETON_ID = "00000000-0000-0000-0000-000000000000";
-const CONFIG_ORG = "_all";
 
 type ConfigForm = {
   phone_number_id: string;
@@ -37,7 +36,7 @@ const EMPTY: ConfigForm = {
   webhook_enabled: "true",
 };
 
-export default function WhatsappSettings({ portfolio }: AgentProps) {
+export default function WhatsappSettings({ portfolio, org }: AgentProps) {
   const [form, setForm] = useState<ConfigForm>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,7 +44,7 @@ export default function WhatsappSettings({ portfolio }: AgentProps) {
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = import.meta.env.VITE_API_URL;
-  const path = `${apiBase}/_data/${portfolio}/${CONFIG_ORG}/whatsapp_config/${SINGLETON_ID}`;
+  const path = `${apiBase}/_data/${portfolio}/${org}/whatsapp_config/${SINGLETON_ID}`;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,8 +127,7 @@ export default function WhatsappSettings({ portfolio }: AgentProps) {
         <CardHeader>
           <CardTitle>WhatsApp settings</CardTitle>
           <CardDescription>
-            Meta Cloud API credentials for this portfolio (stored in{" "}
-            <code>whatsapp_config</code> at <code>_all</code>).
+            Meta Cloud API credentials for this org. The webhook path must use this same org.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

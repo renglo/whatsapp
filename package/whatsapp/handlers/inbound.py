@@ -12,7 +12,7 @@ from renglo.common import load_config
 from renglo.data.data_controller import DataController
 from renglo.schd.schd_loader import SchdLoader
 
-from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.config import ConfigStore, org_from_payload
 from ..lib.describe import describe_document
 from ..lib.identity_store import IdentityStore, extract_code_from_text
 from ..lib.meta_client import parse_meta_messages, send_whatsapp_text, verify_meta_signature
@@ -124,11 +124,10 @@ class Inbound:
         self.AUC.set_invocation_user(user_id)
         self.DAC.AUC.set_invocation_user(user_id)
 
-        session_org = CONFIG_ORG
         coords = ensure_renglo_thread(
             config=self.config,
             portfolio=portfolio,
-            org=session_org,
+            org=org,
             user_id=user_id,
         )
         if not coords.get("success"):
@@ -140,7 +139,7 @@ class Inbound:
 
         agent_payload = {
             "portfolio": portfolio,
-            "org": session_org,
+            "org": org,
             "user_id": user_id,
             "public_user": user_id,
             "entity_type": coords["entity_type"],
@@ -246,7 +245,7 @@ class Inbound:
                 delivery = record_channel_delivery(
                     config=self.config,
                     portfolio=portfolio,
-                    org=CONFIG_ORG,
+                    org=org,
                     user_id=user_id,
                     agent_result=agent_result,
                     channel="whatsapp",
@@ -336,9 +335,11 @@ class Inbound:
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
-        org = str(payload.get("org") or CONFIG_ORG)
+        org = org_from_payload(payload)
         if not portfolio:
             return {"success": False, "message": "portfolio required"}
+        if not org:
+            return {"success": False, "message": "org required"}
 
         raw_body = payload.get("raw_body")
         if raw_body is None and "gupshup_payload" in payload:
@@ -366,7 +367,7 @@ class Inbound:
             or ""
         )
 
-        cfg = ConfigStore(self.DAC, portfolio, CONFIG_ORG).load_for_ingress()
+        cfg = ConfigStore(self.DAC, portfolio, org).load_for_ingress()
         if not cfg.webhook_enabled:
             return {"success": True, "action": "disabled", "message": "webhook_enabled=false"}
 
@@ -382,7 +383,7 @@ class Inbound:
             _logger.warning("Invalid Meta signature for portfolio %s", portfolio)
             return {"success": False, "message": "Invalid signature", "status": 403}
 
-        store = IdentityStore(self.DAC, portfolio, CONFIG_ORG)
+        store = IdentityStore(self.DAC, portfolio, org)
         body_hash = hashlib.sha256(raw_body.encode("utf-8")).hexdigest()
         ingress_trace = dict(payload.get("ingress_trace") or {})
         ingress_trace["webhook_envelope_sha256"] = body_hash

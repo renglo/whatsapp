@@ -1,6 +1,6 @@
 # WhatsApp extension
 
-Meta Cloud API channel for Renglo: inbound webhooks, LINK deep-link user binding, and Graph outbound send. Each portfolio owns its own `whatsapp_config` secrets.
+Meta Cloud API channel for Renglo: inbound webhooks, LINK deep-link user binding, and Graph outbound send. Each org owns its own `whatsapp_config`.
 
 The installable Python distribution is **`renglo-whatsapp`** (import package `whatsapp`) under `package/`.
 
@@ -64,38 +64,31 @@ Webhook URL (org from the path — see [Tenancy](#tenancy-portfolio-org--identit
 
 ## Tenancy (portfolio, org, identity)
 
-### WhatsApp number and credentials — per portfolio
+Each org has its own WhatsApp number. Config, link codes, identities, dedup, and the agent all use the org in the path. There is no portfolio-wide bucket. An org whose id is `_all` is that org only.
 
-`whatsapp_config` is a **portfolio singleton** stored at `(portfolio, _all)`. One Meta phone number / token set serves the whole portfolio. Orgs do **not** each get their own number from this extension.
+### WhatsApp number and credentials — per org
 
-### User linking — portfolio-wide (not per org)
+`whatsapp_config` is stored at `(portfolio, org)`. Assign the tool to the org (that runs `initialize_extension`) before filling Config. Point Meta at that org:
 
-`channel_identities`, `channel_link_codes`, and `channel_inbound_dedup` also live at `(portfolio, _all)`.
+```
+{WEBHOOK_EDGE_BASE_URL}/{portfolio}/{org}/whatsapp
+```
+
+### User linking — this org
+
+`channel_identities`, `channel_link_codes`, and `channel_inbound_dedup` live on the same org.
 
 After Connect WhatsApp:
 
-- A phone (`wa_id`) binds to **one Renglo `user_id`** for that portfolio
-- The link is **not** scoped to a single org — it applies portfolio-wide
-- It is **not** an org-shared inbox — each number belongs to one user (no-steal; replace-on-link for the same user)
+- A phone (`wa_id`) binds to **one Renglo `user_id`** for that org
+- A link on one org does not apply to another org
+- It is **not** a shared inbox — each number belongs to one user (no-steal; replace-on-link for the same user)
 
 Unlinked senders never reach the agent (they get a “connect in console” nag, or complete LINK binding).
 
-### Org context for the agent — from the Meta webhook path
+### Org context for the agent
 
-Meta’s callback URL carries both portfolio and org:
-
-```
-https://<WEBHOOK_EDGE_BASE_URL>/{portfolio}/{org}/whatsapp
-```
-
-Inbound passes that `org` into `agent_handler`. The message text is **not** used to infer org.
-
-| Meta webhook URL | What the agent receives | Implication |
-|------------------|-------------------------|-------------|
-| `…/{portfolio}/{realOrgId}/whatsapp` | `org` = that org | Tools run in a concrete org (e.g. “list expenses” for that org). |
-| `…/{portfolio}/_all/whatsapp` | `org` = `_all` | No specific org is resolved. The agent/tools must handle portfolio-wide search, ask which org, or otherwise disambiguate. WhatsApp itself will not pick an org. |
-
-**Practical guidance:** point Meta at a real org when channel traffic should always be org-scoped. Use `_all` only if the configured `agent_handler` (and its tools) know how to work without a single org.
+Inbound passes the webhook path `org` into `agent_handler`. The message text is not used to pick an org.
 
 ## Install
 
@@ -169,7 +162,7 @@ Subscribe to `messages`. Use the same verify token as in config.
 
 ## User linking (Connect WhatsApp)
 
-Links are **portfolio-wide** (see [Tenancy](#tenancy-portfolio-org--identity)): the phone maps to the user everywhere in that portfolio, independent of which org path Meta uses.
+Links belong to the org you are in (see [Tenancy](#tenancy-portfolio-org--identity)). The phone maps to your user for that org's number.
 
 1. Signed-in user opens **Link** → **Open WhatsApp**
 2. Console mints a high-entropy `LINK-<20>` (hashed at rest, 10 min TTL)
