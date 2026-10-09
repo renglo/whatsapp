@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "renglo-whatsapp"
-version = "1.0.4"
+version = "1.0.5rc1"
 description = "WhatsApp (Meta Cloud API) channel extension for Renglo — webhooks, LINK onboarding, outbound send"
 authors = [
     {name = "NOMA Team"}
@@ -27,4 +27,4 @@ include = ["whatsapp*"]
 "*" = ["blueprints/*.json"]
 
 [tool.renglo]
-platform = "0.1.5"
+platform = "0.1.6"
