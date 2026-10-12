@@ -7,10 +7,7 @@ interface AgentProps {
   tool: string;
 }
 
-/** Portfolio-scoped WhatsApp sessions live at org ``_all``. */
-const SESSION_ORG = "_all";
-
-export default function WhatsappConversations({ portfolio, tool }: AgentProps) {
+export default function WhatsappConversations({ portfolio, org, tool }: AgentProps) {
   const userId = getCurrentUserId();
 
   if (!userId) {
@@ -24,11 +21,11 @@ export default function WhatsappConversations({ portfolio, tool }: AgentProps) {
   return (
     <ChatInspect
       portfolio={portfolio}
-      org={SESSION_ORG}
+      org={org}
       tool={tool}
       readOnly
       title="WhatsApp conversations"
-      description={`Renglo threads for whatsapp-user / ${userId}. Newest thread is the active lane; create a new thread after compaction to reset context.`}
+      description={`Threads for whatsapp-user / ${userId}. Newest thread is the active lane; create a new thread after compaction to reset context.`}
       fixedEntityType="whatsapp-user"
       fixedEntityId={userId}
       threadSource="session_threads"

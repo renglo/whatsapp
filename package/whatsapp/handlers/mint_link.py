@@ -8,7 +8,7 @@ from renglo.auth.auth_controller import AuthController
 from renglo.common import load_config
 from renglo.data.data_controller import DataController
 
-from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.config import ConfigStore, org_from_payload
 from ..lib.describe import describe_document
 from ..lib.identity_store import IdentityStore
 from ..lib.link_token import (
@@ -31,8 +31,8 @@ class MintLink:
         return describe_document(
             "mint_link",
             "Mint WhatsApp link",
-            "Mint a LINK code and wa.me deep link for the authenticated user. "
-            "portfolio is injected by the platform.",
+            "Mint a LINK code and wa.me deep link for the authenticated user in this org. "
+            "portfolio and org are injected by the platform.",
             {},
             output_schema={
                 "type": "object",
@@ -46,19 +46,22 @@ class MintLink:
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
+        org = org_from_payload(payload)
         if not portfolio:
             return {"success": False, "message": "portfolio required"}
+        if not org:
+            return {"success": False, "message": "org required"}
 
         user_id = self.AUC.get_current_user()
         if not user_id:
             return {"success": False, "message": "Authentication required", "status": 401}
 
-        store = IdentityStore(self.DAC, portfolio, CONFIG_ORG)
+        store = IdentityStore(self.DAC, portfolio, org)
         minted = store.mint_link_code(user_id)
         if not minted.get("success"):
             return minted
 
-        cfg = ConfigStore(self.DAC, portfolio, CONFIG_ORG).load()
+        cfg = ConfigStore(self.DAC, portfolio, org).load()
         phone_source = "config"
         digits = ""
         if cfg.is_send_ready():

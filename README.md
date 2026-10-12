@@ -1,6 +1,6 @@
 # WhatsApp extension
 
-Meta Cloud API channel for Renglo: inbound webhooks, LINK deep-link user binding, and Graph outbound send. Each portfolio owns its own `whatsapp_config` secrets.
+Meta Cloud API channel for Renglo: inbound webhooks, LINK deep-link user binding, and Graph outbound send. Each org owns its own `whatsapp_config`.
 
 The installable Python distribution is **`renglo-whatsapp`** (import package `whatsapp`) under `package/`.
 
@@ -10,17 +10,49 @@ Meta (and BSPs) retry when the webhook is slow. The main Flask API Lambda can co
 
 1. Answers Meta’s GET verify handshake
 2. On POST, enqueues EventBridge and returns **200** immediately
-3. Lets `whatsapp/inbound` do HMAC verify, LINK consume, and agent work asynchronously via universal ingress
+3. Lets universal ingress ACK quickly and run `whatsapp/inbound` off the hot path when async workers are available
 
 ## Architecture
 
 ```
 Meta → HTTP API → platform webhook edge → 200
-                     └─ EventBridge → POST /_schd/ingress → whatsapp/inbound
-                                                                        ├─ LINK consume / identity bind
-                                                                        └─ agent_handler (e.g. dumbo/generic_agent)
-                                                                               └─ Graph send reply
+                     └─ EventBridge (~5s client timeout) → POST /_schd/ingress → **202 Accepted**
+                              └─ async worker (Lambda Event self-invoke, peer ECS, or local thread)
+                                   └─ whatsapp/inbound → agent → Graph reply when ready
+                                                   ├─ HMAC + envelope/message dedup
+                                                   ├─ LINK consume / identity bind
+                                                   └─ agent_handler (e.g. dumbo/generic_agent)
+                                                          └─ Graph send reply
 ```
+
+### Duplicate forensics (Meta vs EventBridge)
+
+We have **not** pinned your production duplicates to Meta or EventBridge yet — that requires correlating IDs on real traffic. Each processed user turn stores trace fields on the session `user_message` (visible in **WhatsApp conversations**):
+
+| Field | Meaning |
+|-------|---------|
+| `whatsapp_inbound_message_id` | Meta `messages[].id` (wamid). Same wamid → same user text from Meta’s perspective. |
+| `eventbridge_event_id` | EventBridge event `id` on the HTTP POST to `/_schd/ingress`. **Stable across EventBridge retries** of the same bus event. |
+| `webhook_edge_receipt_id` | New UUID per Meta POST accepted at the webhook edge. **New Meta delivery → new receipt**, even if the body is identical. |
+| `ingress_http_request_id` | API Gateway / load-balancer request id for that ingress HTTP call. **Changes on each EventBridge delivery attempt**. |
+| `webhook_envelope_sha256` | SHA-256 of the raw webhook JSON (dedup key). |
+
+How to read duplicates:
+
+- **Same wamid + same `eventbridge_event_id` + different `ingress_http_request_id`** → EventBridge redelivered the same bus event (ingress slow/error/timeout).
+- **Same wamid + different `eventbridge_event_id` or `webhook_edge_receipt_id`** → Meta (or the edge) produced **multiple** bus events for the same message.
+- **Same wamid, first row only in UI** → later copies were deduped; check API logs for `duplicate` / `duplicate_envelope` lines (they include the same trace fields).
+
+Dedup and async ingress (below) are **mitigations** suggested by architecture; use the table above to confirm the source in your environment.
+
+### Retries and load (mitigations)
+
+| Layer | Behavior |
+|-------|----------|
+| **Envelope dedup** | After HMAC, claims `webhook_envelope_sha256` in `channel_inbound_dedup`. |
+| **Message dedup** | Claims Meta `messages[].id`. |
+| **Async ingress** | `/_schd/ingress` returns **202** and runs handlers in a background worker (Lambda async self-invoke on API Lambda, or peer ECS when configured). EventBridge stops retrying; the agent can use the full Lambda timeout. Sync fallback only if async start fails. |
+| **EventBridge cap** | Stack B target retry limit (when deployed). |
 
 Webhook URL (org from the path — see [Tenancy](#tenancy-portfolio-org--identity)):
 
@@ -32,38 +64,31 @@ Webhook URL (org from the path — see [Tenancy](#tenancy-portfolio-org--identit
 
 ## Tenancy (portfolio, org, identity)
 
-### WhatsApp number and credentials — per portfolio
+Each org has its own WhatsApp number. Config, link codes, identities, dedup, and the agent all use the org in the path. There is no portfolio-wide bucket. An org whose id is `_all` is that org only.
 
-`whatsapp_config` is a **portfolio singleton** stored at `(portfolio, _all)`. One Meta phone number / token set serves the whole portfolio. Orgs do **not** each get their own number from this extension.
+### WhatsApp number and credentials — per org
 
-### User linking — portfolio-wide (not per org)
+`whatsapp_config` is stored at `(portfolio, org)`. Assign the tool to the org (that runs `initialize_extension`) before filling Config. Point Meta at that org:
 
-`channel_identities` and `channel_link_codes` also live at `(portfolio, _all)`.
+```
+{WEBHOOK_EDGE_BASE_URL}/{portfolio}/{org}/whatsapp
+```
+
+### User linking — this org
+
+`channel_identities`, `channel_link_codes`, and `channel_inbound_dedup` live on the same org.
 
 After Connect WhatsApp:
 
-- A phone (`wa_id`) binds to **one Renglo `user_id`** for that portfolio
-- The link is **not** scoped to a single org — it applies portfolio-wide
-- It is **not** an org-shared inbox — each number belongs to one user (no-steal; replace-on-link for the same user)
+- A phone (`wa_id`) binds to **one Renglo `user_id`** for that org
+- A link on one org does not apply to another org
+- It is **not** a shared inbox — each number belongs to one user (no-steal; replace-on-link for the same user)
 
 Unlinked senders never reach the agent (they get a “connect in console” nag, or complete LINK binding).
 
-### Org context for the agent — from the Meta webhook path
+### Org context for the agent
 
-Meta’s callback URL carries both portfolio and org:
-
-```
-https://<WEBHOOK_EDGE_BASE_URL>/{portfolio}/{org}/whatsapp
-```
-
-Inbound passes that `org` into `agent_handler`. The message text is **not** used to infer org.
-
-| Meta webhook URL | What the agent receives | Implication |
-|------------------|-------------------------|-------------|
-| `…/{portfolio}/{realOrgId}/whatsapp` | `org` = that org | Tools run in a concrete org (e.g. “list expenses” for that org). |
-| `…/{portfolio}/_all/whatsapp` | `org` = `_all` | No specific org is resolved. The agent/tools must handle portfolio-wide search, ask which org, or otherwise disambiguate. WhatsApp itself will not pick an org. |
-
-**Practical guidance:** point Meta at a real org when channel traffic should always be org-scoped. Use `_all` only if the configured `agent_handler` (and its tools) know how to work without a single org.
+Inbound passes the webhook path `org` into `agent_handler`. The message text is not used to pick an org.
 
 ## Install
 
@@ -137,7 +162,7 @@ Subscribe to `messages`. Use the same verify token as in config.
 
 ## User linking (Connect WhatsApp)
 
-Links are **portfolio-wide** (see [Tenancy](#tenancy-portfolio-org--identity)): the phone maps to the user everywhere in that portfolio, independent of which org path Meta uses.
+Links belong to the org you are in (see [Tenancy](#tenancy-portfolio-org--identity)). The phone maps to your user for that org's number.
 
 1. Signed-in user opens **Link** → **Open WhatsApp**
 2. Console mints a high-entropy `LINK-<20>` (hashed at rest, 10 min TTL)
@@ -168,7 +193,7 @@ Before any agent reply: Meta HMAC must verify, and the sender must already be li
 | `whatsapp_onboardings` | Cognito `/_schd/run` | Install tool + schd_tools + config |
 | `mint_link` | Cognito `/call` | Mint LINK + deep link |
 | `identities` | Cognito `/call` | List / unlink |
-| `inbound` | EventBridge → `/_schd/ingress` | Verify, link gate, agent dispatch |
+| `inbound` | EventBridge → `/_schd/ingress` | Verify, dedup on Meta `messages[].id`, link gate, agent dispatch |
 | `post_message` | Cognito / internal | Graph text send |
 
 ## Blueprints
@@ -178,6 +203,7 @@ Before any agent reply: Meta HMAC must verify, and the sender must already be li
 | `whatsapp_config` | Singleton Meta credentials + agent routing |
 | `channel_identities` | `whatsapp` + `external_id` → `user_id` |
 | `channel_link_codes` | Hashed LINK tokens |
+| `channel_inbound_dedup` | Seen Meta inbound message ids (~7d TTL metadata) |
 
 ## Package layout
 

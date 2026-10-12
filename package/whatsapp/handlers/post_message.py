@@ -7,7 +7,7 @@ from typing import Any, Dict
 from renglo.common import load_config
 from renglo.data.data_controller import DataController
 
-from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.config import ConfigStore, org_from_payload
 from ..lib.describe import describe_document
 from ..lib.meta_client import send_whatsapp_text
 
@@ -21,7 +21,8 @@ class PostMessage:
         return describe_document(
             "post_message",
             "Send WhatsApp message",
-            "Send a WhatsApp text via the Meta Graph API. portfolio is injected by the platform. "
+            "Send a WhatsApp text via the Meta Graph API using this org's number. "
+            "portfolio and org are injected by the platform. "
             "target also accepts to. message also accepts text.",
             {
                 "target": {
@@ -40,8 +41,11 @@ class PostMessage:
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
+        org = org_from_payload(payload)
         if not portfolio:
             return {"success": False, "message": "portfolio required"}
+        if not org:
+            return {"success": False, "message": "org required"}
 
         target = str(payload.get("target") or payload.get("to") or "").strip()
         message = str(payload.get("message") or payload.get("text") or "").strip()
@@ -49,7 +53,7 @@ class PostMessage:
             return {"success": False, "message": "target and message required"}
 
         # Prefer authenticated load; fall back to ingress load for system callers.
-        store = ConfigStore(self.DAC, portfolio, CONFIG_ORG)
+        store = ConfigStore(self.DAC, portfolio, org)
         try:
             cfg = store.load()
             if not cfg.is_send_ready():

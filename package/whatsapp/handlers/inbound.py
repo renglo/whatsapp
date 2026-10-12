@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any, Dict, List
@@ -11,7 +12,7 @@ from renglo.common import load_config
 from renglo.data.data_controller import DataController
 from renglo.schd.schd_loader import SchdLoader
 
-from ..lib.config import CONFIG_ORG, ConfigStore
+from ..lib.config import ConfigStore, org_from_payload
 from ..lib.describe import describe_document
 from ..lib.identity_store import IdentityStore, extract_code_from_text
 from ..lib.meta_client import parse_meta_messages, send_whatsapp_text, verify_meta_signature
@@ -96,6 +97,8 @@ class Inbound:
         user_id: str,
         message: str,
         external_id: str,
+        inbound_message_id: str = "",
+        ingress_trace: Dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         parts = agent_handler.split("/")
         if len(parts) != 2:
@@ -121,11 +124,10 @@ class Inbound:
         self.AUC.set_invocation_user(user_id)
         self.DAC.AUC.set_invocation_user(user_id)
 
-        session_org = CONFIG_ORG
         coords = ensure_renglo_thread(
             config=self.config,
             portfolio=portfolio,
-            org=session_org,
+            org=org,
             user_id=user_id,
         )
         if not coords.get("success"):
@@ -137,7 +139,7 @@ class Inbound:
 
         agent_payload = {
             "portfolio": portfolio,
-            "org": session_org,
+            "org": org,
             "user_id": user_id,
             "public_user": user_id,
             "entity_type": coords["entity_type"],
@@ -148,6 +150,10 @@ class Inbound:
             "message": message,
             "external_id": external_id,
         }
+        if inbound_message_id:
+            agent_payload["inbound_message_id"] = inbound_message_id
+        if ingress_trace:
+            agent_payload["ingress_trace"] = dict(ingress_trace)
         try:
             result = instance.run(agent_payload)
             return {
@@ -169,10 +175,31 @@ class Inbound:
         cfg,
         store: IdentityStore,
         msg: dict[str, Any],
+        ingress_trace: Dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        trace = dict(ingress_trace or {})
         external_id = msg["external_id"]
         text = msg["text"]
         display_name = msg.get("display_name") or ""
+        inbound_message_id = str(msg.get("message_id") or "").strip()
+
+        if inbound_message_id and not store.claim_inbound_message(inbound_message_id):
+            _logger.info(
+                "Skipping duplicate WhatsApp inbound message_id=%s external_id=%s "
+                "eventbridge_event_id=%s webhook_edge_receipt_id=%s ingress_http_request_id=%s",
+                inbound_message_id,
+                external_id,
+                trace.get("eventbridge_event_id"),
+                trace.get("webhook_edge_receipt_id"),
+                trace.get("ingress_http_request_id"),
+            )
+            return {
+                "success": True,
+                "action": "duplicate",
+                "message_id": inbound_message_id,
+                "external_id": external_id,
+                "ingress_trace": trace,
+            }
 
         identity = store.resolve_identity(external_id)
         link_code = extract_code_from_text(text)
@@ -181,7 +208,17 @@ class Inbound:
             store.touch_last_seen(identity)
             user_id = str(identity.get("user_id") or "")
             if link_code:
-                # Already linked — confirm without burning a new code.
+                minter = store.pending_link_minter(link_code)
+                if minter and minter != user_id:
+                    self._send(cfg, external_id, CONFLICT_REPLY)
+                    return {
+                        "success": True,
+                        "action": "link_conflict",
+                        "user_id": user_id,
+                        "minter_user_id": minter,
+                        "external_id": external_id,
+                    }
+                # Same account, or no valid pending code — confirm without burning.
                 self._send(cfg, external_id, "✓ Already connected.")
                 return {
                     "success": True,
@@ -197,6 +234,8 @@ class Inbound:
                 user_id=user_id,
                 message=text,
                 external_id=external_id,
+                inbound_message_id=inbound_message_id,
+                ingress_trace=trace,
             )
             reply = self._extract_agent_text(agent_result)
             send_result = None
@@ -206,7 +245,7 @@ class Inbound:
                 delivery = record_channel_delivery(
                     config=self.config,
                     portfolio=portfolio,
-                    org=CONFIG_ORG,
+                    org=org,
                     user_id=user_id,
                     agent_result=agent_result,
                     channel="whatsapp",
@@ -296,9 +335,11 @@ class Inbound:
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
-        org = str(payload.get("org") or CONFIG_ORG)
+        org = org_from_payload(payload)
         if not portfolio:
             return {"success": False, "message": "portfolio required"}
+        if not org:
+            return {"success": False, "message": "org required"}
 
         raw_body = payload.get("raw_body")
         if raw_body is None and "gupshup_payload" in payload:
@@ -326,7 +367,7 @@ class Inbound:
             or ""
         )
 
-        cfg = ConfigStore(self.DAC, portfolio, CONFIG_ORG).load_for_ingress()
+        cfg = ConfigStore(self.DAC, portfolio, org).load_for_ingress()
         if not cfg.webhook_enabled:
             return {"success": True, "action": "disabled", "message": "webhook_enabled=false"}
 
@@ -342,11 +383,31 @@ class Inbound:
             _logger.warning("Invalid Meta signature for portfolio %s", portfolio)
             return {"success": False, "message": "Invalid signature", "status": 403}
 
+        store = IdentityStore(self.DAC, portfolio, org)
+        body_hash = hashlib.sha256(raw_body.encode("utf-8")).hexdigest()
+        ingress_trace = dict(payload.get("ingress_trace") or {})
+        ingress_trace["webhook_envelope_sha256"] = body_hash
+
+        if not store.claim_inbound_envelope(body_hash):
+            _logger.info(
+                "Skipping duplicate WhatsApp webhook envelope portfolio=%s "
+                "eventbridge_event_id=%s webhook_edge_receipt_id=%s ingress_http_request_id=%s",
+                portfolio,
+                ingress_trace.get("eventbridge_event_id"),
+                ingress_trace.get("webhook_edge_receipt_id"),
+                ingress_trace.get("ingress_http_request_id"),
+            )
+            return {
+                "success": True,
+                "action": "duplicate_envelope",
+                "body_hash": body_hash,
+                "ingress_trace": ingress_trace,
+            }
+
         messages = parse_meta_messages(body_obj if isinstance(body_obj, dict) else {})
         if not messages:
             return {"success": True, "action": "ignore", "message": "No text messages"}
 
-        store = IdentityStore(self.DAC, portfolio, CONFIG_ORG)
         results: List[Dict[str, Any]] = []
         for msg in messages:
             results.append(
@@ -356,6 +417,7 @@ class Inbound:
                     cfg=cfg,
                     store=store,
                     msg=msg,
+                    ingress_trace=ingress_trace,
                 )
             )
 

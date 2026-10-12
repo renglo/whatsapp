@@ -8,7 +8,7 @@ from renglo.auth.auth_controller import AuthController
 from renglo.common import load_config
 from renglo.data.data_controller import DataController
 
-from ..lib.config import CONFIG_ORG
+from ..lib.config import org_from_payload
 from ..lib.describe import describe_document
 from ..lib.identity_store import IdentityStore
 
@@ -23,8 +23,8 @@ class Identities:
         return describe_document(
             "identities",
             "WhatsApp identities",
-            "List or unlink WhatsApp numbers bound to the authenticated user. "
-            "portfolio is injected by the platform. subhandler is an alias of action.",
+            "List or unlink WhatsApp numbers bound to the authenticated user in this org. "
+            "portfolio and org are injected by the platform. subhandler is an alias of action.",
             {
                 "action": {
                     "type": "string",
@@ -52,15 +52,18 @@ class Identities:
 
     def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         portfolio = str(payload.get("portfolio") or "")
+        org = org_from_payload(payload)
         if not portfolio:
             return {"success": False, "message": "portfolio required"}
+        if not org:
+            return {"success": False, "message": "org required"}
 
         user_id = self.AUC.get_current_user()
         if not user_id:
             return {"success": False, "message": "Authentication required", "status": 401}
 
         action = str(payload.get("action") or payload.get("subhandler") or "list").lower()
-        store = IdentityStore(self.DAC, portfolio, CONFIG_ORG)
+        store = IdentityStore(self.DAC, portfolio, org)
 
         if action in ("list", "status", ""):
             items = store.list_for_user(user_id, authenticated=True)
